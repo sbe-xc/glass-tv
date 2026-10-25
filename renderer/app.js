@@ -14,6 +14,11 @@
     focusEl: null,
     searchQuery: '',
     lastPlayedKey: null,
+    sources: [],          // user-added sources: { id, name, type, count, error }
+    live: new Map(),      // url -> true/false from probing
+    probing: false,
+    hideOffline: localStorage.getItem('hideOffline') === '1',
+    fixtures: null,
   };
 
   const key = (ch) => ch.tvgId ? ch.tvgId : 'name:' + ch.name;
@@ -53,7 +58,9 @@
   // ---------- card ----------
   function channelCard(ch, list, index, listTitle) {
     const card = h('div', 'card' + (ch.logo ? ' has-logo' : ''));
-    card.tabIndex = -1; card.dataset.key = key(ch);
+    card.tabIndex = -1; card.dataset.key = key(ch); card.dataset.url = ch.url;
+    if (state.live.has(ch.url)) card.classList.add(state.live.get(ch.url) ? 'is-live' : 'is-dead');
+    card.appendChild(h('div', 'live-dot-sm'));
     if (ch.logo) {
       const bg = h('div', 'card-bg'); bg.style.backgroundImage = `url("${ch.logo}")`; card.appendChild(bg);
       const logo = h('div', 'card-logo'); const img = document.createElement('img'); img.loading = 'lazy'; img.src = ch.logo; img.alt = '';
@@ -64,7 +71,7 @@
     }
     const footer = h('div', 'card-footer');
     const text = h('div'); text.style.minWidth = '0';
-    text.append(h('div', 'card-name', ch.name), h('div', 'card-meta', [ch.countryName, ch.categories.filter((c) => c !== 'Other')[0]].filter(Boolean).join(' · ')));
+    text.append(h('div', 'card-name', ch.name), h('div', 'card-meta', [ch.source ? ch.source.name : ch.countryName, ch.categories.filter((c) => c !== 'Other')[0]].filter(Boolean).join(' · ')));
     footer.appendChild(text);
     if (ch.quality) footer.appendChild(h('div', 'card-badge', ch.quality.toUpperCase()));
     card.appendChild(footer);
@@ -141,6 +148,14 @@
     if (recents.length) frag.appendChild(cardRow('Continue Watching', recents));
     const favs = resolveKeys([...state.favorites]);
     if (favs.length) frag.appendChild(cardRow('Favorites', favs, { seeAll: () => switchView('favorites') }));
+
+    // One row per user-added source
+    for (const src of state.sources) {
+      const chans = state.channels.filter((c) => c.source && c.source.id === src.id);
+      if (!chans.length) continue;
+      const sorted = [...chans].sort((a, b) => score(b) - score(a));
+      frag.appendChild(cardRow(src.name, sorted, { seeAll: () => openList(src.name, chans, 'home') }));
+    }
 
     for (const name of ['News', 'Sports', 'Entertainment', 'Movies', 'Music', 'Kids', 'Documentary']) {
       const cat = state.categories.find((c) => c.name === name);
@@ -229,10 +244,272 @@
     input.focus();
   }
 
+  // ---------- Sports hub ----------
+  const SPORTS = [
+    { name: 'Football', glyph: '⚽', re: /\b(football|soccer|futbol|fútbol|futebol|calcio|fussball|premier league|premier sports|bundesliga|la ?liga|serie ?a|ligue ?1|uefa|fifa|champions league|libertadores|mls|efl|eredivisie|super ?lig)\b/i, not: /\b(american|nfl|college|afl|gaelic)\b/i },
+    { name: 'Basketball', glyph: '🏀', re: /\b(basket|nba|euroleague|wnba|acb)\b/i },
+    { name: 'American Football', glyph: '🏈', re: /\b(nfl|american football|college football|redzone)\b/i },
+    { name: 'Tennis', glyph: '🎾', re: /\b(tennis|atp|wta|wimbledon|roland)\b/i },
+    { name: 'Motorsport', glyph: '🏎️', re: /\b(motor|f1|formula|racing|nascar|motogp|moto gp|rally|indycar|dakar)\b/i, not: /\bhorse\b/i },
+    { name: 'Combat', glyph: '🥊', re: /\b(fight|mma|ufc|boxing|boxeo|wrestl|wwe|aew|combat|kickbox|muay|bellator|judo|karate)\b/i },
+    { name: 'Cricket', glyph: '🏏', re: /\b(cricket|willow|ipl|bcci|icc)\b/i },
+    { name: 'Golf', glyph: '⛳', re: /\b(golf|pga|lpga)\b/i },
+    { name: 'Rugby', glyph: '🏉', re: /\b(rugby|nrl|super league)\b/i },
+    { name: 'Baseball & Hockey', glyph: '⚾', re: /\b(baseball|mlb|hockey|nhl|khl)\b/i },
+    { name: 'Cycling & Outdoor', glyph: '🚴', re: /\b(cycling|velo|ski|surf|sail|climb|extreme|red ?bull|equestr|horse|polo|marathon)\b/i },
+    { name: 'Esports', glyph: '🎮', re: /\b(esport|e-sport|gaming|gamer|ginx)\b/i },
+    { name: 'Fitness & Wellness', glyph: '🧘', re: /\b(fitness|yoga|gym|workout)\b/i },
+  ];
+  // Only these keywords pull a non-Sports-category channel into the hub (the rest just sub-group Sports channels)
+  const STRONG_SPORT = /\b(sports?|football|soccer|futbol|fútbol|calcio|basketball|nba|nfl|nhl|mlb|tennis|motorsport|motogp|formula|nascar|ufc|mma|boxing|wrestling|wwe|cricket|golf|rugby|esports?|fight)\b/i;
+
+  function sportOf(ch) {
+    const hay = ch.name + ' ' + ch.categories.join(' ');
+    for (const s of SPORTS) if (s.re.test(hay) && !(s.not && s.not.test(hay))) return s.name;
+    return 'Multi-sport';
+  }
+  function isSportsChannel(ch) {
+    return ch.categories.some((c) => /sport/i.test(c)) || STRONG_SPORT.test(ch.name);
+  }
+  function sportsChannels() {
+    return state.channels.filter(isSportsChannel);
+  }
+
+  // Probe a list of channels for liveness in batches, updating cards as results arrive.
+  async function probeChannels(channels) {
+    if (state.probing) return;
+    state.probing = true;
+    const todo = channels.filter((c) => !state.live.has(c.url));
+    const statusEl = () => document.getElementById('sports-status');
+    let done = channels.length - todo.length;
+    const update = () => {
+      const el = statusEl(); if (!el) return;
+      const liveCount = channels.filter((c) => state.live.get(c.url)).length;
+      el.replaceChildren();
+      if (todo.length && done < channels.length) { el.appendChild(h('div', 'spinner')); el.appendChild(h('span', null, `Checking streams… ${done}/${channels.length} · ${liveCount} live so far`)); }
+      else el.appendChild(h('span', null, `${liveCount} of ${channels.length} streams live · checked in the last 30 min`));
+    };
+    update();
+    try {
+      for (let i = 0; i < todo.length; i += 16) {
+        if (state.view !== 'sports') break; // stop if the user navigates away
+        const batch = todo.slice(i, i + 16);
+        const res = await window.glasstv.probeStreams(batch.map((c) => ({ url: c.url, userAgent: c.userAgent, referrer: c.referrer })));
+        for (const [url, ok] of Object.entries(res)) {
+          state.live.set(url, ok);
+          content.querySelectorAll(`.card[data-url="${CSS.escape(url)}"]`).forEach((card) => {
+            card.classList.toggle('is-live', ok); card.classList.toggle('is-dead', !ok);
+            if (!ok && state.hideOffline) card.style.display = 'none';
+          });
+        }
+        done += batch.length;
+        update();
+      }
+    } finally { state.probing = false; }
+  }
+
+  function fixtureCard(f, now) {
+    const live = f.start && now >= f.start && now < f.start + 115 * 60 * 1000 && !/finished|ft/i.test(f.status || '');
+    const finished = f.homeScore != null && f.awayScore != null && !live;
+    const card = h('div', 'fixture' + (live ? ' live' : ''));
+    const when = h('div', 'fixture-when');
+    const d = f.start ? new Date(f.start) : null;
+    const whenText = !d ? 'TBC' : (d.toDateString() === new Date(now).toDateString() ? 'Today ' : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + ' ') + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    when.appendChild(h('span', null, finished ? 'Full time · ' + d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : whenText));
+    if (live) { const lp = h('div', 'live-pill'); lp.append(h('span', 'live-dot'), document.createTextNode('LIVE')); when.appendChild(lp); }
+    else if (f.round) when.appendChild(h('span', null, `MW ${f.round}`));
+    card.appendChild(when);
+    const teams = h('div', 'fixture-teams');
+    for (const side of ['home', 'away']) {
+      const t = h('div', 'fixture-team');
+      if (f[side + 'Badge']) { const img = document.createElement('img'); img.src = f[side + 'Badge'] + '/tiny'; img.alt = ''; img.onerror = () => img.remove(); t.appendChild(img); }
+      t.appendChild(h('span', null, f[side]));
+      if (finished || live) t.appendChild(h('span', 'score', f[side + 'Score'] ?? '–'));
+      teams.appendChild(t);
+    }
+    card.appendChild(teams);
+    const foot = h('div', 'fixture-foot');
+    foot.appendChild(h('div', 'fixture-tv', f.tv || f.venue || ''));
+    if (!finished) { const w = h('button', 'pill-btn primary fixture-watch', live ? 'Watch' : 'Find channel'); w.addEventListener('click', () => openMatchFinder(f)); foot.appendChild(w); }
+    card.appendChild(foot);
+    return card;
+  }
+
+  // Channels likely to carry Premier League football, ranked: user sources first, then by name match strength.
+  const EPL_CARRIERS = /premier league|sky sports (premier|main event|football)|sky sport(s)?\b|tnt sports?|bt sport|bein ?sports?|supersport|optus sport|dazn|peacock|nbc ?sports|usa network|espn|fubo|sportsnet|canal\+ ?sport|viaplay|movistar|v sport|setanta|astro|star sports|premier sports|now sports|match ?tv|arena sport|sport ?tv|eleven sports|stan sport|hub premier|ssc|abu dhabi sports|alkass|onefootball|football/i;
+  function matchCarriers() {
+    const scored = [];
+    for (const ch of state.channels) {
+      if (!EPL_CARRIERS.test(ch.name)) continue;
+      let s = 0;
+      if (ch.source) s += 100;
+      if (/premier league|main event|sky sports|tnt sport|bein sport|supersport|peacock|optus|dazn/i.test(ch.name)) s += 20;
+      if (/premier/i.test(ch.name)) s += 10;
+      if (state.live.get(ch.url) === true) s += 15;
+      if (state.live.get(ch.url) === false) s -= 50;
+      s += score(ch);
+      scored.push({ ch, s });
+    }
+    return scored.sort((a, b) => b.s - a.s).map((x) => x.ch);
+  }
+
+  function openMatchFinder(f) {
+    const modal = $('match-modal'), body = $('match-body');
+    $('match-title').textContent = `${f.home} v ${f.away}`;
+    const d = f.start ? new Date(f.start) : null;
+    $('match-sub').textContent = (d ? d.toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '') + (f.tv ? ' · ' + f.tv : '');
+    body.replaceChildren();
+    const carriers = matchCarriers().slice(0, 40);
+    const own = carriers.filter((c) => c.source);
+    if (!own.length) {
+      const e = h('div', 'match-empty');
+      e.innerHTML = '<b>None of your sources carry Premier League football.</b><br>Live EPL matches are only available from licensed broadcasters (Sky, TNT, Peacock, beIN, SuperSport, Optus…). If you subscribe to a provider that gives you an M3U or Xtream login, add it under <b>Sources</b> and matches will show up here.';
+      body.appendChild(e);
+      const b = h('button', 'pill-btn primary', 'Open Sources'); b.style.marginTop = '14px';
+      b.addEventListener('click', () => { closeModal(modal); openSources(); });
+      body.appendChild(b);
+      if (carriers.length) body.appendChild(h('div', 'match-empty', ' ')).style.marginTop = '12px';
+    }
+    if (carriers.length) {
+      const list = h('div', 'match-list');
+      if (!own.length) list.appendChild(h('div', 'section-count', 'Free sports channels with a football name — unlikely to carry this match, but worth a look:'));
+      carriers.forEach((ch, i) => {
+        const item = h('div', 'drawer-item');
+        const logo = h('div', 'drawer-logo'); if (ch.logo) { const img = document.createElement('img'); img.src = ch.logo; img.alt = ''; img.onerror = () => img.remove(); logo.appendChild(img); }
+        const text = h('div'); text.style.minWidth = '0';
+        const name = h('div', 'drawer-name'); name.textContent = ch.name;
+        if (ch.source) { const tag = h('span', 'src-tag', ch.source.name); tag.style.marginLeft = '8px'; name.appendChild(tag); }
+        const meta = h('div', 'drawer-meta', [ch.countryName, ch.quality, state.live.get(ch.url) === true ? 'live' : state.live.get(ch.url) === false ? 'offline' : ''].filter(Boolean).join(' · '));
+        text.append(name, meta);
+        item.append(logo, text);
+        item.addEventListener('click', () => { closeModal(modal); Player.open(carriers, i, `${f.home} v ${f.away}`); });
+        list.appendChild(item);
+      });
+      body.appendChild(list);
+    }
+    openModal(modal);
+  }
+
+  async function renderSports() {
+    const frag = document.createDocumentFragment();
+    const head = h('div', 'section-head');
+    head.append(h('div', 'section-title', 'Sports'), h('div', 'section-count', `${sportsChannels().length} channels`));
+    const toggle = h('label', 'toggle'); toggle.style.marginLeft = 'auto';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = state.hideOffline;
+    cb.addEventListener('change', () => { state.hideOffline = cb.checked; localStorage.setItem('hideOffline', cb.checked ? '1' : '0'); content.querySelectorAll('.card.is-dead').forEach((c) => { c.style.display = cb.checked ? 'none' : ''; }); });
+    toggle.append(cb, document.createTextNode('Hide offline'));
+    head.appendChild(toggle);
+    frag.appendChild(head);
+
+    // Fixtures strip
+    const fx = h('section', 'fixtures');
+    const fxHead = h('div', 'fixtures-head');
+    const ft = h('div', 'fixtures-title'); ft.append(h('span', 'epl', 'EPL'), document.createTextNode('Premier League'));
+    fxHead.append(ft, h('div', 'fixtures-note', 'Loading fixtures…'));
+    const fxScroller = h('div', 'fixtures-scroller');
+    fx.append(fxHead, fxScroller);
+    frag.appendChild(fx);
+
+    frag.appendChild(h('div', 'sports-status')).id = 'sports-status';
+
+    // Sport groups
+    const chans = sportsChannels();
+    const groups = new Map();
+    for (const ch of chans) { const s = sportOf(ch); if (!groups.has(s)) groups.set(s, []); groups.get(s).push(ch); }
+    const order = [...SPORTS.map((s) => s.name), 'Multi-sport'];
+    const toProbe = [];
+    for (const name of order) {
+      const list = groups.get(name); if (!list) continue;
+      const sorted = list.sort((a, b) => (b.source ? 1 : 0) - (a.source ? 1 : 0) || (state.live.get(b.url) === true) - (state.live.get(a.url) === true) || score(b) - score(a));
+      const glyph = (SPORTS.find((s) => s.name === name) || { glyph: '🏟️' }).glyph;
+      frag.appendChild(cardRow(`${glyph}  ${name}`, sorted, { limit: 30, seeAll: () => openList(name, sorted, 'sports') }));
+      toProbe.push(...sorted.slice(0, 30));
+    }
+    content.replaceChildren(frag);
+    if (state.hideOffline) content.querySelectorAll('.card.is-dead').forEach((c) => { c.style.display = 'none'; });
+
+    probeChannels(toProbe);
+
+    try {
+      const data = state.fixtures && Date.now() - state.fixtures.fetchedAt < 10 * 60 * 1000 ? state.fixtures : await window.glasstv.eplFixtures();
+      state.fixtures = data;
+      if (state.view !== 'sports') return;
+      const now = Date.now();
+      const upcoming = data.upcoming.filter((f) => f.start).sort((a, b) => a.start - b.start);
+      const recent = data.recent.filter((f) => f.start).sort((a, b) => b.start - a.start).slice(0, 4);
+      const liveOnes = upcoming.filter((f) => now >= f.start && now < f.start + 115 * 60 * 1000);
+      const shown = [...liveOnes, ...upcoming.filter((f) => !liveOnes.includes(f)).slice(0, 10), ...recent];
+      fxScroller.replaceChildren(...shown.map((f) => fixtureCard(f, now)));
+      fxHead.lastChild.textContent = liveOnes.length ? `${liveOnes.length} match${liveOnes.length > 1 ? 'es' : ''} live now` : upcoming.length ? `Next: ${new Date(upcoming[0].start).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}` : 'No fixtures listed';
+      if (!shown.length) fxScroller.appendChild(h('div', 'match-empty', 'Fixture data is unavailable right now.'));
+    } catch (err) {
+      fxHead.lastChild.textContent = 'Fixtures unavailable';
+    }
+  }
+
+  // ---------- Sources panel ----------
+  function openModal(m) { m.classList.remove('hidden'); }
+  function closeModal(m) { m.classList.add('hidden'); }
+
+  async function renderSourceList() {
+    const list = $('source-list');
+    list.replaceChildren();
+    const builtin = h('div', 'source-item source-builtin');
+    builtin.append(h('div', 'source-icon', '🌐'));
+    const bt = h('div', 'source-text'); bt.append(h('div', 'source-name', 'iptv-org'), h('div', 'source-meta', `${state.channels.filter((c) => !c.source).length.toLocaleString()} free-to-air channels · built in`));
+    builtin.append(bt, h('button', 'source-remove', 'Remove'));
+    list.appendChild(builtin);
+    for (const src of state.sources) {
+      const item = h('div', 'source-item');
+      item.append(h('div', 'source-icon', src.type === 'xtream' ? '🔑' : '📄'));
+      const t = h('div', 'source-text');
+      t.append(h('div', 'source-name', src.name), h('div', 'source-meta' + (src.error ? ' err' : ''), src.error ? `Couldn't load: ${src.error}` : `${src.count.toLocaleString()} channels · ${src.type === 'xtream' ? 'Xtream Codes' : 'M3U'}`));
+      const rm = h('button', 'source-remove', 'Remove');
+      rm.addEventListener('click', async () => { await window.glasstv.removeSource(src.id); await reloadSources(); toast(`Removed ${src.name}`); });
+      item.append(t, rm);
+      list.appendChild(item);
+    }
+  }
+
+  function openSources() { renderSourceList(); $('src-error').textContent = ''; openModal($('sources-modal')); const f = $('sources-modal').querySelector('.form-fields:not(.hidden) .field'); if (f) f.focus(); }
+
+  async function addSourceFromForm() {
+    const type = $('source-type').querySelector('.seg-btn.active').dataset.type;
+    const btn = $('src-add'), err = $('src-error');
+    const payload = type === 'xtream'
+      ? { type, server: $('xt-server').value, username: $('xt-user').value, password: $('xt-pass').value, name: $('xt-name').value }
+      : { type, url: $('src-url').value, name: $('src-name').value };
+    if (type === 'm3u' && !/^https?:\/\//i.test(payload.url.trim())) { err.textContent = 'Enter a full http(s) URL to an .m3u / .m3u8 playlist.'; return; }
+    if (type === 'xtream' && (!payload.server.trim() || !payload.username.trim() || !payload.password)) { err.textContent = 'Server, username and password are all required.'; return; }
+    btn.disabled = true; btn.textContent = 'Checking…'; err.textContent = '';
+    try {
+      const res = await window.glasstv.addSource(payload);
+      ['src-url', 'src-name', 'xt-server', 'xt-user', 'xt-pass', 'xt-name'].forEach((id) => { $(id).value = ''; });
+      await reloadSources();
+      toast(`Added ${res.name} · ${res.channels.toLocaleString()} channels`);
+    } catch (e) {
+      err.textContent = String(e.message || e).replace(/^Error invoking remote method '[^']+': Error: /, '');
+    } finally { btn.disabled = false; btn.textContent = 'Add source'; }
+  }
+
+  $('sources-btn').addEventListener('click', openSources);
+  $('sources-close').addEventListener('click', () => closeModal($('sources-modal')));
+  $('match-close').addEventListener('click', () => closeModal($('match-modal')));
+  document.querySelectorAll('.modal-backdrop').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m) closeModal(m); }));
+  $('source-type').addEventListener('click', (e) => {
+    const b = e.target.closest('.seg-btn'); if (!b) return;
+    $('source-type').querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.form-fields').forEach((f) => f.classList.toggle('hidden', f.dataset.for !== b.dataset.type));
+    const f = document.querySelector('.form-fields:not(.hidden) .field'); if (f) f.focus();
+  });
+  $('src-add').addEventListener('click', addSourceFromForm);
+  $('sources-modal').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList.contains('field')) addSourceFromForm(); });
+
   function renderList() {
     const { title, channels, backView } = state.listCtx;
     const frag = document.createDocumentFragment();
-    const back = h('button', 'back-link', `‹ ${backView === 'countries' ? 'Countries' : 'Categories'}`);
+    const backLabel = { countries: 'Countries', categories: 'Categories', sports: 'Sports', home: 'Watch Now' }[backView] || 'Back';
+    const back = h('button', 'back-link', `‹ ${backLabel}`);
     back.addEventListener('click', () => switchView(backView));
     frag.appendChild(back);
     const head = h('div', 'section-head'); head.append(h('div', 'section-title', title), h('div', 'section-count', `${channels.length} channels`)); frag.appendChild(head);
@@ -261,6 +538,7 @@
       case 'countries': renderCountries(); break;
       case 'favorites': renderFavorites(); break;
       case 'search': renderSearch(); break;
+      case 'sports': renderSports(); break;
       case 'list': renderList(); break;
     }
     if (state.view !== 'search') requestAnimationFrame(() => { const first = content.querySelector('.hero, .card, .tile'); if (first) setFocus(first, false); });
@@ -280,7 +558,7 @@
   }
 
   function moveFocus(dir) {
-    const items = [...content.querySelectorAll('.hero, .card, .tile')];
+    const items = [...content.querySelectorAll('.hero, .card, .tile')].filter((it) => it.offsetParent !== null);
     if (!items.length) return;
     if (!state.focusEl || !items.includes(state.focusEl)) { setFocus(items[0], true); return; }
     const cur = state.focusEl.getBoundingClientRect();
@@ -309,7 +587,10 @@
   // ---------- keyboard ----------
   document.addEventListener('keydown', (e) => {
     if (e.metaKey && e.ctrlKey && (e.key === 'f' || e.key === 'F')) { window.glasstv.toggleFullscreen(); return; }
+    const openModalEl = document.querySelector('.modal-backdrop:not(.hidden)');
+    if (openModalEl) { if (e.key === 'Escape') closeModal(openModalEl); return; }
     if (Player.isOpen()) { if (Player.handleKey(e)) e.preventDefault(); return; }
+    if (e.metaKey && e.key === ',') { e.preventDefault(); openSources(); return; }
 
     const typing = document.activeElement && document.activeElement.tagName === 'INPUT';
     if (typing) return;
@@ -324,13 +605,13 @@
         break;
       case '/': e.preventDefault(); switchView('search'); break;
       case 'f': case 'F': if (state.focusEl && state.focusEl.classList.contains('card')) { const k = state.focusEl.dataset.key; const ch = state.byId.get(k); if (ch) toast(toggleFavorite(ch) ? 'Added to Favorites' : 'Removed from Favorites'); } break;
-      case '1': case '2': case '3': case '4': case '5': {
-        const views = ['home', 'categories', 'countries', 'favorites', 'search'];
+      case '1': case '2': case '3': case '4': case '5': case '6': {
+        const views = ['home', 'sports', 'categories', 'countries', 'favorites', 'search'];
         switchView(views[Number(e.key) - 1]); break;
       }
       case 'Tab': {
         e.preventDefault();
-        const views = ['home', 'categories', 'countries', 'favorites', 'search'];
+        const views = ['home', 'sports', 'categories', 'countries', 'favorites', 'search'];
         const cur = views.indexOf(state.view === 'list' ? state.listCtx.backView : state.view);
         switchView(views[(cur + (e.shiftKey ? -1 : 1) + views.length) % views.length]);
         break;
@@ -348,24 +629,54 @@
   }
 
   // ---------- boot ----------
+  let baseChannels = [];
+  function rebuild() {
+    const userChannels = [];
+    for (const src of state.sources) userChannels.push(...(src.channels || []));
+    const channels = baseChannels.concat(userChannels);
+    const { categories, countries } = Playlist.buildIndexes(channels);
+    state.channels = channels; state.categories = categories; state.countries = countries;
+    state.byId = new Map();
+    for (const ch of channels) if (!state.byId.has(key(ch))) state.byId.set(key(ch), ch);
+    const meta = $('topbar-meta');
+    const base = meta.dataset.base || '';
+    meta.textContent = `${channels.length.toLocaleString()} channels · ${base}`;
+  }
+
+  async function reloadSources(force) {
+    const loaded = await window.glasstv.loadSources({ force });
+    state.sources = loaded.map((s) => {
+      const src = { id: s.id, name: s.name, type: s.type, error: s.error || null, channels: [] };
+      if (s.text) {
+        src.channels = Playlist.parse(s.text, { id: s.id, name: s.name }).filter((c) => c.url);
+        // user playlists rarely carry country codes; make categories useful instead
+        for (const ch of src.channels) if (!ch.country) ch.countryName = s.name;
+      }
+      src.count = src.channels.length;
+      return src;
+    });
+    rebuild();
+    if (!$('sources-modal').classList.contains('hidden')) renderSourceList();
+    if (!Player.isOpen()) render();
+  }
+
   async function load(force) {
     const boot = $('boot'), status = $('boot-status'), refresh = $('refresh-btn');
-    if (force) { refresh.classList.add('spinning'); toast('Refreshing playlist…'); }
+    if (force) { refresh.classList.add('spinning'); toast('Refreshing playlists…'); }
     try {
       const res = await window.glasstv.loadPlaylist({ force });
       status.textContent = 'Building your guide…';
       await new Promise((r) => setTimeout(r, 20));
-      const channels = Playlist.parse(res.text).filter((c) => c.url);
-      const { categories, countries } = Playlist.buildIndexes(channels);
-      state.channels = channels; state.categories = categories; state.countries = countries;
-      state.byId = new Map();
-      for (const ch of channels) if (!state.byId.has(key(ch))) state.byId.set(key(ch), ch);
+      baseChannels = Playlist.parse(res.text).filter((c) => c.url);
       const when = new Date(res.updatedAt);
-      $('topbar-meta').textContent = `${channels.length.toLocaleString()} channels · ${res.stale ? 'offline copy' : 'updated ' + when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+      $('topbar-meta').dataset.base = res.stale ? 'offline copy' : when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      state.sources = [];
+      rebuild();
       boot.classList.add('hidden');
       $('browse').classList.remove('hidden');
       render();
-      if (force) toast(`Loaded ${channels.length.toLocaleString()} channels`);
+      await reloadSources(force);
+      if (force) toast(`Loaded ${state.channels.length.toLocaleString()} channels`);
     } catch (err) {
       status.textContent = `Couldn't load the playlist: ${err.message || err}`;
       $('boot').querySelector('.boot-bar').style.display = 'none';
@@ -375,7 +686,7 @@
     }
   }
 
-  window.App = { toast, isFavorite, toggleFavorite, addRecent, onPlayerClosed };
+  window.App = { toast, isFavorite, toggleFavorite, addRecent, onPlayerClosed, openSources };
   window.__dbg = state;
   load(false);
 })();

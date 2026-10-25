@@ -22,11 +22,11 @@
     return String.fromCodePoint(...code.toUpperCase().split('').map((c) => base + c.charCodeAt(0)));
   }
 
-  function parse(text) {
+  let idx = 0;
+  function parse(text, source) {
     const lines = text.split(/\r?\n/);
     const channels = [];
     let current = null;
-    let idx = 0;
 
     for (const raw of lines) {
       const line = raw.trim();
@@ -67,6 +67,7 @@
           userAgent: attrs['http-user-agent'] || '',
           referrer: attrs['http-referrer'] || '',
           url: '',
+          source: source || null, // { id, name } for user-added playlists; null for iptv-org
         };
       } else if (line.startsWith('#EXTVLCOPT')) {
         if (!current) continue;
@@ -79,7 +80,7 @@
         continue;
       } else if (current) {
         current.url = line;
-        current.search = (current.name + ' ' + current.countryName + ' ' + current.categories.join(' ')).toLowerCase();
+        current.search = (current.name + ' ' + current.countryName + ' ' + current.categories.join(' ') + ' ' + (source ? source.name : '')).toLowerCase();
         channels.push(current);
         current = null;
       }

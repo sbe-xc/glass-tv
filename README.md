@@ -21,14 +21,36 @@ npm run dist
 
 Output lands in `dist/`.
 
+## Your own sources
+
+Click the download icon in the top bar (or press ⌘,) to open **Sources**. Add any M3U/M3U8
+playlist URL, or an **Xtream Codes** login (server, username, password) from a provider you
+subscribe to. Each source is validated on add, cached like the built-in playlist, gets its own
+row on Watch Now, and its channels flow into Categories, Search, Favorites and the Sports hub.
+Credentials are stored locally in `~/Library/Application Support/glasstv/sources.json`.
+
+## Sports hub
+
+The **Sports** tab groups every sports channel (built-in and yours) by sport — Football,
+Basketball, Motorsport, Combat, Cricket, … — and checks streams in the background so live ones
+get a green dot and dead ones are dimmed (toggle **Hide offline** to drop them). At the top, a
+Premier League strip shows the current matchweek with kick-off times, live scores and results
+(data from TheSportsDB). **Find channel** lists the channels in your sources most likely to carry
+that match — your own sources first.
+
+Live Premier League and Sky Sports are only available from licensed broadcasters; GlassTV does not
+bundle or locate those streams. Add a subscription that gives you an M3U or Xtream login and the
+match finder will surface it.
+
 ## Keyboard
 
 | Browsing | |
 | --- | --- |
 | Arrows | Move focus (tvOS-style spatial navigation) |
 | Enter | Play |
-| Tab / ⇧Tab, 1–5 | Switch tabs |
+| Tab / ⇧Tab, 1–6 | Switch tabs |
 | `/` | Search |
+| ⌘, | Sources |
 | F | Toggle favorite on the focused channel |
 | Esc | Back |
 
