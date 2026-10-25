@@ -5,6 +5,7 @@
   "description": "An Apple TV-style IPTV player for macOS, powered by iptv-org playlists",
   "main": "main.js",
   "private": true,
+  "author": "Sean <s@tbfo.ai>",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --mac"
@@ -19,6 +20,7 @@
   "build": {
     "appId": "ai.tbfo.glasstv",
     "mac": {
+      "icon": "assets/icon.icns",
       "category": "public.app-category.entertainment",
       "target": [
         "dmg",
@@ -30,7 +32,7 @@
       "main.js",
       "preload.js",
       "renderer/**/*",
-      "assets/**/*"
+      "assets/icon.icns"
     ]
   },
   "allowScripts": {

@@ -1,0 +1,45 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;background:transparent}</style></head>
+<body><canvas id="c" width="1024" height="1024"></canvas>
+<script>
+  const c = document.getElementById('c'), ctx = c.getContext('2d');
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+
+  // Tile (macOS squircle-ish, standard 1024 icon keeps ~100px margin)
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 40; ctx.shadowOffsetY = 20;
+  rr(100, 100, 824, 824, 230);
+  const base = ctx.createLinearGradient(100, 100, 924, 924); base.addColorStop(0, '#1b1733'); base.addColorStop(1, '#0a0912');
+  ctx.fillStyle = base; ctx.fill();
+  ctx.restore();
+
+  ctx.save(); rr(100, 100, 824, 824, 230); ctx.clip();
+  let g = ctx.createRadialGradient(260, 190, 0, 260, 190, 560); g.addColorStop(0, 'rgba(125,100,255,0.95)'); g.addColorStop(1, 'rgba(125,100,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 1024, 1024);
+  g = ctx.createRadialGradient(840, 880, 0, 840, 880, 520); g.addColorStop(0, 'rgba(255,90,160,0.85)'); g.addColorStop(1, 'rgba(255,90,160,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 1024, 1024);
+  // top sheen
+  g = ctx.createLinearGradient(0, 100, 0, 420); g.addColorStop(0, 'rgba(255,255,255,0.22)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(100, 100, 824, 320);
+  ctx.restore();
+
+  // Glass pane
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 50; ctx.shadowOffsetY = 26;
+  rr(212, 292, 600, 440, 76);
+  g = ctx.createLinearGradient(212, 292, 812, 732); g.addColorStop(0, 'rgba(255,255,255,0.34)'); g.addColorStop(1, 'rgba(255,255,255,0.12)');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.restore();
+  rr(212, 292, 600, 440, 76); ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.stroke();
+  // inner highlight line
+  ctx.save(); rr(212, 292, 600, 440, 76); ctx.clip();
+  ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fillRect(240, 295, 544, 3);
+  ctx.restore();
+
+  // Play glyph
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 24; ctx.shadowOffsetY = 12;
+  ctx.beginPath(); ctx.moveTo(470, 428); ctx.lineTo(620, 512); ctx.lineTo(470, 596); ctx.closePath();
+  ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.restore();
+</script></body></html>
