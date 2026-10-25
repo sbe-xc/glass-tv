@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>GlassTV</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="drag-region"></div>
+
+  <!-- Boot / loading -->
+  <div id="boot" class="boot">
+    <div class="boot-logo">
+      <div class="boot-mark"></div>
+      <div class="boot-title">GlassTV</div>
+    </div>
+    <div class="boot-status" id="boot-status">Loading channels…</div>
+    <div class="boot-bar"><div class="boot-bar-fill"></div></div>
+  </div>
+
+  <!-- Browse -->
+  <div id="browse" class="browse hidden">
+    <header class="topbar">
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-view="home">Watch Now</button>
+        <button class="tab" data-view="categories">Categories</button>
+        <button class="tab" data-view="countries">Countries</button>
+        <button class="tab" data-view="favorites">Favorites</button>
+        <button class="tab tab-icon" data-view="search" title="Search (/)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        </button>
+      </nav>
+      <div class="topbar-right">
+        <span class="topbar-meta" id="topbar-meta"></span>
+        <button class="pill-btn" id="refresh-btn" title="Refresh playlist">↻</button>
+      </div>
+    </header>
+
+    <main id="content" class="content"></main>
+  </div>
+
+  <!-- Player -->
+  <div id="player" class="player hidden">
+    <video id="video" autoplay playsinline></video>
+    <div class="player-vignette"></div>
+    <div class="audio-stage" id="audio-stage">
+      <div class="audio-glow"></div>
+      <div class="audio-logo glass" id="audio-logo"></div>
+      <div class="audio-name" id="audio-name"></div>
+      <div class="audio-bars"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="audio-hint">Audio only</div>
+    </div>
+
+    <div class="player-chrome" id="player-chrome">
+      <div class="player-top">
+        <button class="glass-btn" id="back-btn" title="Back (Esc)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <div class="player-top-right">
+          <button class="glass-btn" id="list-btn" title="Channel list (L)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          </button>
+          <button class="glass-btn" id="fav-btn" title="Favorite (F)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M12 20.5s-7.5-4.6-7.5-10A4.5 4.5 0 0 1 12 7.6a4.5 4.5 0 0 1 7.5 2.9c0 5.4-7.5 10-7.5 10z"/></svg>
+          </button>
+          <button class="glass-btn" id="mute-btn" title="Mute (M)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h3l4 3V7l-4 3H4z"/><path class="wave" d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/><path class="wave" d="M18 7a7 7 0 0 1 0 10"/></svg>
+          </button>
+          <button class="glass-btn" id="fs-btn" title="Fullscreen (⌃⌘F)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="player-banner glass" id="banner">
+        <div class="banner-logo" id="banner-logo"></div>
+        <div class="banner-text">
+          <div class="banner-name" id="banner-name"></div>
+          <div class="banner-sub" id="banner-sub"></div>
+        </div>
+        <div class="banner-right">
+          <div class="live-pill"><span class="live-dot"></span>LIVE</div>
+          <div class="banner-pos" id="banner-pos"></div>
+        </div>
+      </div>
+
+      <div class="surf-hint glass" id="surf-hint">
+        <span>↑ ↓</span> surf channels &nbsp;·&nbsp; <span>L</span> list &nbsp;·&nbsp; <span>Esc</span> back
+      </div>
+    </div>
+
+    <div class="player-status glass hidden" id="player-status">
+      <div class="spinner"></div>
+      <div class="status-text" id="status-text">Tuning in…</div>
+    </div>
+
+    <div class="player-error glass hidden" id="player-error">
+      <div class="error-title">This channel isn't responding</div>
+      <div class="error-sub" id="error-sub">The stream may be offline or geo-blocked.</div>
+      <div class="error-actions">
+        <button class="pill-btn primary" id="error-next">Next channel</button>
+        <button class="pill-btn" id="error-retry">Retry</button>
+        <button class="pill-btn" id="error-back">Back</button>
+      </div>
+      <div class="error-countdown" id="error-countdown"></div>
+    </div>
+
+    <aside class="channel-drawer glass hidden" id="drawer">
+      <div class="drawer-head">
+        <div class="drawer-title" id="drawer-title">Channels</div>
+        <input class="drawer-search" id="drawer-search" placeholder="Filter…" />
+      </div>
+      <div class="drawer-list" id="drawer-list"></div>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast glass hidden"></div>
+
+  <script src="../node_modules/hls.js/dist/hls.min.js"></script>
+  <script src="playlist.js"></script>
+  <script src="player.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+{
+  "name": "glasstv",
+  "productName": "GlassTV",
+  "version": "0.1.0",
+  "description": "An Apple TV-style IPTV player for macOS, powered by iptv-org playlists",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac"
+  },
+  "dependencies": {
+    "hls.js": "^1.5.17"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "ai.tbfo.glasstv",
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "target": [
+        "dmg",
+        "dir"
+      ],
+      "darkModeSupport": true
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*"
+    ]
+  },
+  "allowScripts": {
+    "electron@33.4.11": true
+  }
+}
