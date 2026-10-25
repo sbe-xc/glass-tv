@@ -158,12 +158,19 @@ async function debugPlayTest(names, dir) {
       await new Promise(r => setTimeout(r, 10000));
       const v = document.getElementById('video');
       const out = { name: ch.name, url: ch.url, t: v.currentTime.toFixed(1), w: v.videoWidth, h: v.videoHeight, paused: v.paused, err: !document.getElementById('player-error').classList.contains('hidden') };
-      Player.close();
       return JSON.stringify(out);
     })()`).catch((e) => String(e));
     console.log('PLAYTEST', r);
+    if (process.env.GLASSTV_FORCE_AUDIO) {
+      await win.webContents.executeJavaScript(`(() => { const ch = window.__dbg.channels.find(c => c.name === ${JSON.stringify(name)}) || window.__dbg.channels[0];
+        document.getElementById('player').classList.add('audio-only');
+        document.getElementById('audio-logo').innerHTML = '<img src="' + ch.logo + '">';
+        document.getElementById('audio-name').textContent = ch.name; })()`).catch(() => {});
+      await sleep(800);
+    }
+    if (dir) { const img = await win.webContents.capturePage(); fs.writeFileSync(path.join(dir, `playtest-${name.replace(/\W+/g, '_')}.png`), img.toPNG()); }
+    await win.webContents.executeJavaScript('Player.close()').catch(() => {});
   }
-  if (dir) { const img = await win.webContents.capturePage(); fs.writeFileSync(path.join(dir, 'playtest.png'), img.toPNG()); }
   console.log('PLAYTEST DONE');
 }
 
